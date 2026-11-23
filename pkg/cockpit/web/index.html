@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>shadowtap Cockpit | Traffic Shadowing & Semantic Diff Studio</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Top Navigation Bar -->
+    <header class="navbar">
+      <div class="nav-left">
+        <div class="brand">
+          <div class="pulse-dot"></div>
+          <span class="brand-title">shadowtap</span>
+          <span class="brand-badge">PROD SENTINEL</span>
+        </div>
+      </div>
+
+      <div class="nav-metrics">
+        <div class="metric-pill">
+          <span class="metric-label">GLOBAL SRR</span>
+          <span class="metric-val text-accent" id="global-srr-val">0.00%</span>
+        </div>
+        <div class="metric-pill">
+          <span class="metric-label">SHADOWED</span>
+          <span class="metric-val" id="total-shadowed-val">0</span>
+        </div>
+        <div class="metric-pill">
+          <span class="metric-label">REGRESSIONS</span>
+          <span class="metric-val text-danger" id="total-regressed-val">0</span>
+        </div>
+        <div class="metric-pill">
+          <span class="metric-label">QUEUE BUFFER</span>
+          <span class="metric-val" id="queue-depth-val">0 / 5000</span>
+        </div>
+      </div>
+
+      <div class="nav-right">
+        <div class="connection-status" id="connection-status">
+          <span class="status-indicator live"></span>
+          <span class="status-text">LIVE SSE</span>
+        </div>
+        <button class="btn btn-secondary" id="pause-stream-btn">Pause Stream</button>
+      </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="main-content">
+      <!-- Section 1: Route Regression Scorecard -->
+      <section class="panel scorecard-panel">
+        <div class="panel-header">
+          <div class="panel-title-group">
+            <h2 class="panel-title">Route Regression Scorecard</h2>
+            <span class="panel-subtitle">Real-time candidate compatibility by endpoint</span>
+          </div>
+          <div class="scorecard-summary" id="routes-summary-text">0 active routes monitored</div>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table" id="routes-table">
+            <thead>
+              <tr>
+                <th>ROUTE</th>
+                <th>REQUESTS</th>
+                <th>SRR</th>
+                <th>PRIMARY p99</th>
+                <th>SHADOW p99</th>
+                <th>LATENCY DELTA</th>
+                <th>HEALTH STATUS</th>
+              </tr>
+            </thead>
+            <tbody id="routes-tbody">
+              <tr>
+                <td colspan="7" class="empty-state">Awaiting inbound shadowed traffic...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Section 2: Split View - Live Feed & Payload Diff Inspector -->
+      <section class="split-section">
+        <!-- Left Column: Live Traffic Transactions Stream -->
+        <div class="panel feed-panel">
+          <div class="panel-header">
+            <div class="panel-title-group">
+              <h2 class="panel-title">Live Transactions Feed</h2>
+              <span class="panel-subtitle">Streamed non-blocking shadow pairs</span>
+            </div>
+            <div class="feed-controls">
+              <input type="text" id="filter-search" class="search-input" placeholder="Filter by route or ID..." />
+              <div class="filter-tabs">
+                <button class="tab-btn active" id="tab-all">All</button>
+                <button class="tab-btn" id="tab-regressed">Regressed Only</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="transactions-list" id="transactions-list">
+            <div class="empty-state">No transaction pairs captured yet</div>
+          </div>
+        </div>
+
+        <!-- Right Column: Dual-Pane Payload Diff Viewer -->
+        <div class="panel diff-panel">
+          <div class="panel-header">
+            <div class="panel-title-group">
+              <h2 class="panel-title" id="diff-title">Payload Diff Inspector</h2>
+              <span class="panel-subtitle" id="diff-subtitle">Select a transaction on the left to inspect semantic divergence</span>
+            </div>
+            <div class="diff-actions" id="diff-meta-tags">
+              <!-- Dynamic tags for selected pair -->
+            </div>
+          </div>
+
+          <!-- Mismatches Summary Banner -->
+          <div class="mismatches-container" id="mismatches-container" style="display: none;">
+            <div class="mismatches-header">Detected Discrepancies (<span id="mismatches-count">0</span>)</div>
+            <div class="mismatches-chips" id="mismatches-chips"></div>
+          </div>
+
+          <!-- Dual Pane Code Diff -->
+          <div class="dual-pane-container">
+            <div class="pane-column">
+              <div class="pane-header">
+                <span class="pane-badge badge-primary">PRIMARY (PRODUCTION)</span>
+                <span class="pane-stats" id="primary-pane-stats">HTTP --- | 0ms</span>
+              </div>
+              <pre class="code-view" id="primary-code-view">// Primary JSON payload will appear here</pre>
+            </div>
+
+            <div class="pane-column">
+              <div class="pane-header">
+                <span class="pane-badge badge-shadow">SHADOW (CANDIDATE)</span>
+                <span class="pane-stats" id="shadow-pane-stats">HTTP --- | 0ms</span>
+              </div>
+              <pre class="code-view" id="shadow-code-view">// Shadow JSON payload will appear here</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

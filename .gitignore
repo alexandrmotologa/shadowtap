@@ -5,7 +5,7 @@ bin/
 *.dll
 *.so
 *.dylib
-shadowtap
+/shadowtap
 
 # Test artifacts
 *.test
@@ -13,11 +13,12 @@ shadowtap
 coverage.html
 reports/
 
-# Local databases and logs
+# Local databases and runtime logs
 data/
 *.db
 *.db-journal
 *.ndjson
+!examples/*.ndjson
 
 # IDE
 .idea/
