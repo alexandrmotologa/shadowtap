@@ -1,6 +1,23 @@
-# shadowtap
+<p align="center">
+  <img src="docs/images/logo.png" alt="shadowtap Sentinel Logo" width="130" style="border-radius: 28px;" />
+</p>
 
-Production traffic shadowing reverse proxy and zero-risk dark launching sentinel written in Go.
+<h1 align="center">shadowtap</h1>
+
+<p align="center">
+  <strong>Production Traffic Shadowing, Semantic Diffing & Zero-Risk Dark Launching Proxy in Go</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go Version" />
+  <img src="https://img.shields.io/badge/Latency_Overhead-%3C1.5ms-10b981" alt="Latency Overhead" />
+  <img src="https://img.shields.io/badge/Memory-%3C20MB_RAM-38bdf8" alt="Memory Footprint" />
+  <img src="https://img.shields.io/badge/License-MIT-a855f7" alt="License" />
+</p>
+
+<p align="center">
+  <img src="docs/images/shadowtap_demo.gif" alt="shadowtap Live Cockpit Studio Demo" width="100%" />
+</p>
 
 `shadowtap` duplicates live production HTTP requests asynchronously and mirrors them to candidate releases (canary or staging environments). It performs real-time semantic payload diffing while ignoring non-deterministic runtime noise (such as timestamps, generated UUIDs, and JWT signatures), masks sensitive PII data, protects candidate backends with dry-run mutation guards, and measures the Semantic Regression Rate (SRR) alongside latency percentile deltas.
 
@@ -18,6 +35,21 @@ Production traffic shadowing reverse proxy and zero-risk dark launching sentinel
 - **Automated Webhook Alerting**: Send real-time alert notifications to Slack, Discord, or custom webhook endpoints on critical status code drifts (e.g. Primary 200 vs Shadow 500) or SRR threshold breaches.
 - **Embedded Web Cockpit**: Live browser interface on port 8989 featuring side-by-side color-coded payload diffs, real-time Server-Sent Events (SSE) updates, route-level regression scorecards, and latency comparison bars.
 - **Downstream Circuit Breaker**: Automatically trips and sheds shadow traffic if candidate targets experience elevated error rates or network timeouts.
+
+---
+
+## Visual Studio & Cockpit Telemetry
+
+![shadowtap Desktop Cockpit Dashboard](docs/images/cockpit_desktop.png)
+
+*The Cockpit Diff Studio on port 8989 displays live traffic streams, route-level Semantic Regression Rates (SRR), percentile latency comparisons (p50/p99), and side-by-side color-coded payload diffing with one-click ignore rules.*
+
+<p align="center">
+  <img src="docs/images/cockpit_mobile.png" alt="shadowtap Mobile Responsive Dashboard" width="380" />
+</p>
+<p align="center">
+  <em>Responsive telemetry cockpit verified across mobile, tablet, and desktop viewports with zero text wrapping.</em>
+</p>
 
 ---
 
