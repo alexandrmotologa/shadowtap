@@ -1,0 +1,26 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+shadowtap
+
+# Test artifacts
+*.test
+*.out
+coverage.html
+reports/
+
+# Local databases and logs
+data/
+*.db
+*.db-journal
+*.ndjson
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
