@@ -42,6 +42,7 @@
           <span class="status-indicator live"></span>
           <span class="status-text">LIVE SSE</span>
         </div>
+        <button class="btn btn-secondary" id="export-ndjson-btn" title="Download observed transactions as NDJSON for CI/CD audits">Export NDJSON</button>
         <button class="btn btn-secondary" id="pause-stream-btn">Pause Stream</button>
       </div>
     </header>
@@ -53,7 +54,7 @@
         <div class="panel-header">
           <div class="panel-title-group">
             <h2 class="panel-title">Route Regression Scorecard</h2>
-            <span class="panel-subtitle">Real-time candidate compatibility by endpoint</span>
+            <span class="panel-subtitle">Real-time candidate compatibility and latency comparison</span>
           </div>
           <div class="scorecard-summary" id="routes-summary-text">0 active routes monitored</div>
         </div>
@@ -67,7 +68,7 @@
                 <th>SRR</th>
                 <th>PRIMARY p99</th>
                 <th>SHADOW p99</th>
-                <th>LATENCY DELTA</th>
+                <th>LATENCY SPREAD</th>
                 <th>HEALTH STATUS</th>
               </tr>
             </thead>
@@ -90,12 +91,17 @@
               <span class="panel-subtitle">Streamed non-blocking shadow pairs</span>
             </div>
             <div class="feed-controls">
-              <input type="text" id="filter-search" class="search-input" placeholder="Filter by route or ID..." />
-              <div class="filter-tabs">
-                <button class="tab-btn active" id="tab-all">All</button>
-                <button class="tab-btn" id="tab-regressed">Regressed Only</button>
-              </div>
+              <input type="text" id="filter-search" class="search-input" placeholder="Search route or ID..." />
             </div>
+          </div>
+
+          <!-- Mismatch Category Filter Tabs -->
+          <div class="filter-tab-bar">
+            <button class="tab-btn active" data-filter="all">All</button>
+            <button class="tab-btn" data-filter="regressed">Regressed</button>
+            <button class="tab-btn" data-filter="status_drift">Status Drift</button>
+            <button class="tab-btn" data-filter="type_drift">Type Drift</button>
+            <button class="tab-btn" data-filter="missing_key">Missing Key</button>
           </div>
 
           <div class="transactions-list" id="transactions-list">
@@ -117,7 +123,10 @@
 
           <!-- Mismatches Summary Banner -->
           <div class="mismatches-container" id="mismatches-container" style="display: none;">
-            <div class="mismatches-header">Detected Discrepancies (<span id="mismatches-count">0</span>)</div>
+            <div class="mismatches-header">
+              <span>Detected Discrepancies (<span id="mismatches-count">0</span>)</span>
+              <span class="mismatches-hint">Click "+ Ignore" to mute non-breaking fields at runtime</span>
+            </div>
             <div class="mismatches-chips" id="mismatches-chips"></div>
           </div>
 
@@ -128,7 +137,9 @@
                 <span class="pane-badge badge-primary">PRIMARY (PRODUCTION)</span>
                 <span class="pane-stats" id="primary-pane-stats">HTTP --- | 0ms</span>
               </div>
-              <pre class="code-view" id="primary-code-view">// Primary JSON payload will appear here</pre>
+              <div class="code-view-container">
+                <div class="code-view" id="primary-code-view">// Primary JSON payload will appear here</div>
+              </div>
             </div>
 
             <div class="pane-column">
@@ -136,12 +147,17 @@
                 <span class="pane-badge badge-shadow">SHADOW (CANDIDATE)</span>
                 <span class="pane-stats" id="shadow-pane-stats">HTTP --- | 0ms</span>
               </div>
-              <pre class="code-view" id="shadow-code-view">// Shadow JSON payload will appear here</pre>
+              <div class="code-view-container">
+                <div class="code-view" id="shadow-code-view">// Shadow JSON payload will appear here</div>
+              </div>
             </div>
           </div>
         </div>
       </section>
     </main>
+
+    <!-- Toast Notification Container -->
+    <div class="toast" id="toast-notify"></div>
   </div>
 
   <script src="app.js"></script>

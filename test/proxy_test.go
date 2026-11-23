@@ -48,6 +48,7 @@ func TestProxy_EndToEndShadowing(t *testing.T) {
 	telemetry := metrics.NewGlobalTelemetry()
 	store := storage.NewRingBuffer(100)
 
+	maskConfig := diff.DefaultMaskConfig()
 	dispCfg := proxy.DispatcherConfig{
 		ShadowTarget:   shadowServer.URL,
 		SampleRate:     1.0,
@@ -56,7 +57,7 @@ func TestProxy_EndToEndShadowing(t *testing.T) {
 		RequestTimeout: 2 * time.Second,
 		PIIConfig:      security.DefaultPIIConfig(),
 		MutationConfig: security.DefaultMutationConfig(),
-		MaskConfig:     diff.DefaultMaskConfig(),
+		MaskConfig:     &maskConfig,
 	}
 
 	dispatcher, err := proxy.NewShadowDispatcher(dispCfg, telemetry, store)

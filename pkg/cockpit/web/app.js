@@ -1,7 +1,7 @@
 // shadowtap Cockpit Frontend Application
 (function () {
   let isStreamPaused = false;
-  let activeFilter = 'all'; // 'all' or 'regressed'
+  let activeFilter = 'all'; // 'all', 'regressed', 'status_drift', 'type_drift', 'missing_key'
   let searchQuery = '';
   let transactions = [];
   let selectedTxId = null;
@@ -13,12 +13,12 @@
   const totalRegressedElem = document.getElementById('total-regressed-val');
   const queueDepthElem = document.getElementById('queue-depth-val');
   const pauseStreamBtn = document.getElementById('pause-stream-btn');
+  const exportNdjsonBtn = document.getElementById('export-ndjson-btn');
   const routesTbody = document.getElementById('routes-tbody');
   const routesSummary = document.getElementById('routes-summary-text');
   const txListElem = document.getElementById('transactions-list');
   const searchInput = document.getElementById('filter-search');
-  const tabAll = document.getElementById('tab-all');
-  const tabRegressed = document.getElementById('tab-regressed');
+  const toastElem = document.getElementById('toast-notify');
 
   // Diff Pane Elements
   const diffTitle = document.getElementById('diff-title');
@@ -53,24 +53,36 @@
       pauseStreamBtn.style.color = isStreamPaused ? '#000' : '';
     });
 
-    tabAll.addEventListener('click', () => {
-      activeFilter = 'all';
-      tabAll.classList.add('active');
-      tabRegressed.classList.remove('active');
-      renderTransactions();
-    });
+    if (exportNdjsonBtn) {
+      exportNdjsonBtn.addEventListener('click', () => {
+        showToast('Exporting captured transactions to NDJSON...');
+        window.location.href = '/api/export/ndjson';
+      });
+    }
 
-    tabRegressed.addEventListener('click', () => {
-      activeFilter = 'regressed';
-      tabRegressed.classList.add('active');
-      tabAll.classList.remove('active');
-      renderTransactions();
+    // Filter tab buttons
+    document.querySelectorAll('.filter-tab-bar .tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-tab-bar .tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeFilter = btn.getAttribute('data-filter');
+        renderTransactions();
+      });
     });
 
     searchInput.addEventListener('input', (e) => {
       searchQuery = e.target.value.toLowerCase().trim();
       renderTransactions();
     });
+  }
+
+  function showToast(msg) {
+    if (!toastElem) return;
+    toastElem.textContent = msg;
+    toastElem.style.display = 'block';
+    setTimeout(() => {
+      toastElem.style.display = 'none';
+    }, 3500);
   }
 
   // Fetch Summary Stats
@@ -114,6 +126,11 @@
       const deltaMs = r.latency_delta_p99_ms.toFixed(1);
       const deltaSign = r.latency_delta_p99_ms > 0 ? `+${deltaMs}ms` : `${deltaMs}ms`;
 
+      // Sparkline latency visual calculation
+      const maxLatency = Math.max(r.primary_latency_p99_ms, r.shadow_latency_p99_ms, 1.0);
+      const primPct = Math.min(Math.round((r.primary_latency_p99_ms / maxLatency) * 100), 100);
+      const shadPct = Math.min(Math.round((r.shadow_latency_p99_ms / maxLatency) * 100), 100);
+
       return `
         <tr>
           <td><span class="route-badge">${escapeHtml(r.route)}</span></td>
@@ -121,7 +138,16 @@
           <td><strong class="${r.srr > 0 ? 'text-danger' : 'text-success'}">${srrPct}%</strong></td>
           <td>${r.primary_latency_p99_ms.toFixed(1)}ms</td>
           <td>${r.shadow_latency_p99_ms.toFixed(1)}ms</td>
-          <td class="${r.latency_delta_p99_ms > 5 ? 'text-warning' : ''}">${deltaSign}</td>
+          <td>
+            <div class="latency-bar-container">
+              <div class="latency-bar-wrapper" title="Primary: ${r.primary_latency_p99_ms.toFixed(1)}ms">
+                <div class="bar-prim" style="width: ${primPct}%;"></div>
+              </div>
+              <div class="latency-bar-wrapper" title="Shadow: ${r.shadow_latency_p99_ms.toFixed(1)}ms">
+                <div class="bar-shad" style="width: ${shadPct}%;"></div>
+              </div>
+            </div>
+          </td>
           <td>
             <span class="status-badge ${isHealthy ? 'badge-healthy' : 'badge-danger'}">
               ${isHealthy ? 'HEALTHY' : 'REGRESSED'}
@@ -182,9 +208,19 @@
   // Render Transaction List
   function renderTransactions() {
     const filtered = transactions.filter(t => {
-      if (activeFilter === 'regressed' && t.diff.is_match) {
-        return false;
+      // Filter by tab
+      if (activeFilter === 'regressed' && t.diff.is_match) return false;
+      if (activeFilter === 'status_drift' && !t.diff.status_drift) return false;
+      if (activeFilter === 'type_drift') {
+        const hasType = (t.diff.mismatches || []).some(m => m.kind === 'TYPE_DRIFT');
+        if (!hasType) return false;
       }
+      if (activeFilter === 'missing_key') {
+        const hasMissing = (t.diff.mismatches || []).some(m => m.kind === 'MISSING_KEY');
+        if (!hasMissing) return false;
+      }
+
+      // Filter by search query
       if (searchQuery) {
         const matchPath = t.path && t.path.toLowerCase().includes(searchQuery);
         const matchMethod = t.method && t.method.toLowerCase().includes(searchQuery);
@@ -260,27 +296,89 @@
       </span>
     `;
 
-    // Discrepancies Chips
+    // Discrepancies Chips with One-Click Ignore Buttons
     const mismatches = t.diff.mismatches || [];
     if (mismatches.length > 0) {
       mismatchesContainer.style.display = 'block';
       mismatchesCount.textContent = mismatches.length;
-      mismatchesChips.innerHTML = mismatches.map(m => `
-        <div class="chip">
-          <span class="chip-kind ${m.kind}">${m.kind}</span>
-          <span>${escapeHtml(m.path)}: ${escapeHtml(m.message)}</span>
-        </div>
-      `).join('');
+      mismatchesChips.innerHTML = mismatches.map(m => {
+        const canIgnore = m.path && !m.path.startsWith('_');
+        return `
+          <div class="chip">
+            <span class="chip-kind ${m.kind}">${m.kind}</span>
+            <span>${escapeHtml(m.path)}: ${escapeHtml(m.message)}</span>
+            ${canIgnore ? `<button class="btn-chip-ignore" data-path="${escapeHtml(m.path)}" title="Ignore this field dynamically in real time">+ Ignore</button>` : ''}
+          </div>
+        `;
+      }).join('');
+
+      // Attach ignore listeners
+      mismatchesChips.querySelectorAll('.btn-chip-ignore').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const path = btn.getAttribute('data-path');
+          try {
+            const res = await fetch('/api/mask/ignore', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: path })
+            });
+            if (res.ok) {
+              btn.textContent = 'Ignored!';
+              btn.disabled = true;
+              showToast(`Field pattern '${path}' added to active mask rules.`);
+            }
+          } catch (err) {
+            console.error('Failed to add ignore pattern:', err);
+          }
+        });
+      });
     } else {
       mismatchesContainer.style.display = 'none';
     }
 
-    // Update Panes
+    // Update Panes Stats
     primaryPaneStats.textContent = `HTTP ${t.primary.status_code} | ${t.primary.latency_ms.toFixed(1)}ms`;
     shadowPaneStats.textContent = `HTTP ${t.shadow.status_code} | ${t.shadow.latency_ms.toFixed(1)}ms`;
 
-    primaryCodeView.textContent = t.diff.primary_clean_json || t.primary.body || '// No payload body';
-    shadowCodeView.textContent = t.diff.shadow_clean_json || t.shadow.body || '// No payload body';
+    // Line-by-line colored diff rendering
+    const primRaw = t.diff.primary_clean_json || t.primary.body || '// No payload body';
+    const shadRaw = t.diff.shadow_clean_json || t.shadow.body || '// No payload body';
+
+    primaryCodeView.innerHTML = renderHighlightedLines(primRaw, mismatches, 'primary');
+    shadowCodeView.innerHTML = renderHighlightedLines(shadRaw, mismatches, 'shadow');
+  }
+
+  // Render code lines with visual highlight classes
+  function renderHighlightedLines(jsonText, mismatches, side) {
+    if (!jsonText) return '';
+    const lines = jsonText.split('\n');
+
+    return lines.map(line => {
+      let lineClass = '';
+
+      for (const m of mismatches) {
+        if (!m.path || m.path.startsWith('_')) continue;
+        // Extract leaf key name
+        const parts = m.path.split('.');
+        const lastPart = parts[parts.length - 1].replace(/\[\d+\]/g, '');
+
+        if (lastPart && line.includes(`"${lastPart}"`)) {
+          if (m.kind === 'MISSING_KEY') {
+            if (side === 'primary') lineClass = 'line-del';
+          } else if (m.kind === 'UNEXPECTED_KEY') {
+            if (side === 'shadow') lineClass = 'line-add';
+          } else if (m.kind === 'TYPE_DRIFT') {
+            lineClass = 'line-drift';
+          } else if (m.kind === 'VALUE_DRIFT') {
+            lineClass = side === 'primary' ? 'line-del' : 'line-add';
+          }
+          break;
+        }
+      }
+
+      return `<div class="diff-line ${lineClass}">${escapeHtml(line)}</div>`;
+    }).join('');
   }
 
   function escapeHtml(str) {

@@ -1,0 +1,62 @@
+# shadowtap Configuration Specification
+version: "1"
+
+server:
+  listen: ":8080"
+  primary_url: "http://prod-api.internal:8080"
+  shadow_url: "http://candidate-api.internal:8080"
+  max_body_bytes: 10485760 # 10MB
+  workers: 16
+  queue_cap: 5000
+
+cockpit:
+  enabled: true
+  port: 8989
+
+sampling:
+  default_rate: 1.0 # Sample 100% of non-matching traffic
+  routes:
+    - path_pattern: "/api/v1/checkout*"
+      rate: 1.0       # 100% sampling for checkout
+    - path_pattern: "/api/v1/search*"
+      rate: 0.10      # 10% sampling for high-frequency search
+    - path_pattern: "/healthz"
+      rate: 0.0       # Drop health check traffic
+  header_filters: []  # Optional: e.g. [{header: "X-Beta-Tester", value: "true"}]
+
+exclusions:
+  - "/healthz"
+  - "/health"
+  - "/metrics"
+  - "/ready"
+
+shadow_headers:
+  "X-Shadow-Env": "staging"
+
+security:
+  mask_pii: true
+  dry_run_header: "X-Dry-Run"
+  dry_run_value: "true"
+  mutation_policy: "DRY_RUN_HEADER" # DRY_RUN_HEADER | PATH_PREFIX | DROP_MUTATIONS
+
+diff:
+  ignore_array_order: true
+  numeric_epsilon: 0.00001
+  regression_threshold: 0.0
+  ignored_paths:
+    - "*.timestamp"
+    - "*_timestamp"
+    - "*.created_at"
+    - "*.updated_at"
+    - "*.requestId"
+    - "*.traceId"
+
+alerting:
+  webhook_url: "" # e.g. "https://hooks.slack.com/services/..."
+  srr_threshold: 0.02 # Alert if SRR exceeds 2%
+  alert_on_status_drift: true
+
+recorder:
+  enabled: false
+  output_file: "./data/recorded_traffic.ndjson"
+  buffer_limit: 5000

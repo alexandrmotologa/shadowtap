@@ -32,6 +32,7 @@ func BenchmarkProxyOverhead(b *testing.B) {
 	telemetry := metrics.NewGlobalTelemetry()
 	store := storage.NewRingBuffer(5000)
 
+	maskCfg := diff.DefaultMaskConfig()
 	dispCfg := proxy.DispatcherConfig{
 		ShadowTarget:   shadowServer.URL,
 		SampleRate:     1.0,
@@ -40,7 +41,7 @@ func BenchmarkProxyOverhead(b *testing.B) {
 		RequestTimeout: 2 * time.Second,
 		PIIConfig:      security.DefaultPIIConfig(),
 		MutationConfig: security.DefaultMutationConfig(),
-		MaskConfig:     diff.DefaultMaskConfig(),
+		MaskConfig:     &maskCfg,
 	}
 
 	dispatcher, err := proxy.NewShadowDispatcher(dispCfg, telemetry, store)

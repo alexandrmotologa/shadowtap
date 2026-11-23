@@ -9,11 +9,14 @@ Production traffic shadowing reverse proxy and zero-risk dark launching sentinel
 ## Key Capabilities
 
 - **Zero-Impact Asynchronous Mirroring**: Dispatches requests to the primary upstream service synchronously while asynchronously enqueuing cloned requests into a bounded worker pool. Primary client responses incur less than 1.5ms added proxy latency.
-- **Intelligent Semantic JSON Diffing**: Ignores dynamic transient fields (ISO-8601 timestamps, UUID v1-v5, JWTs, trace IDs) and compares JSON structural schemas, types, and values using Jaccard distance calculation.
+- **Intelligent Semantic JSON Diffing**: Ignores dynamic transient fields (ISO-8601 timestamps, UUID v1-v5, JWTs, trace IDs), neutralizes unordered array differences, and compares JSON structural schemas, types, and values using Jaccard distance calculation.
+- **Dynamic Masking and One-Click Ignore**: Add new ignore patterns directly from the Cockpit UI with one click or via API without restarting the proxy.
+- **Declarative YAML Configuration**: Configure complex routing rules, per-route sampling rates, path exclusions, and header filters in `shadowtap.yaml`.
 - **PII Scrubbing and Credential Masking**: Automatically hashes or redacts sensitive headers (`Authorization`, `Cookie`, `X-Api-Key`) and body fields (credit cards, passwords, emails, SSNs) before traffic leaves the proxy.
 - **Mutation Safety Guard**: Automatically injects safety headers (`X-Dry-Run: true`, `X-Shadow-Request: true`) or rewrites paths on mutating methods (`POST`, `PUT`, `PATCH`, `DELETE`) to avoid duplicate database mutations in candidate services.
-- **Embedded Web Cockpit**: Live browser interface on port 8989 featuring side-by-side unified payload diffs, real-time Server-Sent Events (SSE) updates, route-level regression scorecards, and latency percentiles.
-- **Offline Traffic Replay and CI/CD Auditing**: Replays recorded production traffic logs (NDJSON) against candidate targets and exports standard JUnit XML reports for automated release gating.
+- **Live Traffic Recording and Export**: Record live transactions directly to NDJSON on disk or export them with one click from the Cockpit dashboard for CI/CD audits.
+- **Automated Webhook Alerting**: Send real-time alert notifications to Slack, Discord, or custom webhook endpoints on critical status code drifts (e.g. Primary 200 vs Shadow 500) or SRR threshold breaches.
+- **Embedded Web Cockpit**: Live browser interface on port 8989 featuring side-by-side color-coded payload diffs, real-time Server-Sent Events (SSE) updates, route-level regression scorecards, and latency comparison bars.
 - **Downstream Circuit Breaker**: Automatically trips and sheds shadow traffic if candidate targets experience elevated error rates or network timeouts.
 
 ---
@@ -59,6 +62,7 @@ Production traffic shadowing reverse proxy and zero-risk dark launching sentinel
 |  |           Semantic Response Diffing Engine            |  |
 |  |  - Volatile Field Masking (UUID, Timestamp, Hash)     |  |
 |  |  - Structural Schema & Type Invariance Check          |  |
+|  |  - Unordered Array Set Equivalence                    |  |
 |  |  - Latency Delta Measurement: (t_shadow - t_primary)  |  |
 |  +-------------------------------------------------------+  |
 +------------------------------|------------------------------+
@@ -69,6 +73,7 @@ Production traffic shadowing reverse proxy and zero-risk dark launching sentinel
 |  1. Semantic Regression Rate (SRR) Scorecard                |
 |  2. Real-Time Prometheus Metrics (/metrics)                 |
 |  3. Embedded Web Cockpit (:8989) Live Diff Studio           |
+|  4. Webhook Alerts (Slack / Discord / Generic)              |
 +-------------------------------------------------------------+
 ```
 
@@ -140,21 +145,49 @@ This launches:
 - The Cockpit Diff Studio on `http://localhost:8989`
 - A continuous background traffic generator across multiple endpoints
 
-### 2. Running in Production or Staging
-Mirror live traffic from an existing production service to a candidate release:
+### 2. Running with Declarative YAML Configuration
+Start shadowtap using a configuration file:
 
 ```bash
-./bin/shadowtap start \
-  --listen ":8080" \
-  --primary "http://prod-api.internal:8080" \
-  --shadow "http://candidate-api.internal:8080" \
-  --sample-rate 1.0 \
-  --mask-pii \
-  --cockpit
+./bin/shadowtap start --config shadowtap.yaml
 ```
 
-### 3. CI/CD Automated Regression Audit
-Replay logged production traffic against a candidate microservice before running deployment workflows:
+Example `shadowtap.yaml`:
+```yaml
+server:
+  listen: ":8080"
+  primary_url: "http://prod-api.internal:8080"
+  shadow_url: "http://candidate-api.internal:8080"
+
+sampling:
+  default_rate: 1.0
+  routes:
+    - path_pattern: "/api/v1/checkout*"
+      rate: 1.0
+    - path_pattern: "/api/v1/search*"
+      rate: 0.10
+
+exclusions:
+  - "/healthz"
+  - "/metrics"
+
+alerting:
+  webhook_url: "https://hooks.slack.com/services/..."
+  srr_threshold: 0.02
+```
+
+### 3. Record Live Production Traffic
+Record live traffic into NDJSON files for offline auditing:
+
+```bash
+./bin/shadowtap record \
+  --listen ":8080" \
+  --primary "http://prod-api.internal:8080" \
+  --output "./data/prod_traffic.ndjson"
+```
+
+### 4. CI/CD Automated Regression Audit
+Replay recorded production traffic against a candidate microservice before running deployment workflows:
 
 ```bash
 ./bin/shadowtap audit \
@@ -173,16 +206,26 @@ If the measured SRR exceeds `0.01` (1%), the command exits with code 1, automati
 ### `shadowtap start`
 | Flag | Default | Description |
 | :--- | :--- | :--- |
+| `--config` | `""` | Path to declarative YAML/JSON configuration file |
 | `--listen` | `:8080` | Proxy bind address and port |
 | `--primary` | (Required) | Target URL for primary production traffic |
 | `--shadow` | (Required) | Target URL for candidate shadow traffic |
-| `--sample-rate` | `1.0` | Sampling ratio between 0.0 and 1.0 (e.g. 0.25 for 25% traffic) |
+| `--sample-rate` | `1.0` | Sampling ratio between 0.0 and 1.0 |
 | `--mask-pii` | `true` | Redact credit cards, emails, SSNs, and authentication tokens |
 | `--cockpit` | `true` | Enable embedded Cockpit web studio |
 | `--cockpit-port` | `8989` | Port for the Cockpit web interface |
 | `--workers` | `16` | Number of concurrent shadow worker goroutines |
 | `--queue-cap` | `5000` | In-memory ring buffer capacity for shadow tasks |
 | `--dry-run-header`| `X-Dry-Run: true` | Custom header injected on mutating requests |
+| `--record-output`| `""` | Optional path to stream live transactions to NDJSON |
+| `--webhook-url` | `""` | Optional webhook URL for regression alerts |
+
+### `shadowtap record`
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--listen` | `:8080` | Proxy bind address and port |
+| `--primary` | (Required) | Target URL for primary production traffic |
+| `--output` | `./data/recorded_traffic.ndjson` | Destination NDJSON file path |
 
 ### `shadowtap audit`
 | Flag | Default | Description |
@@ -196,7 +239,7 @@ If the measured SRR exceeds `0.01` (1%), the command exits with code 1, automati
 
 ## Observability and Prometheus Metrics
 
-`shadowtap` exports Prometheus metrics on `http://localhost:8989/metrics` (or proxy port when Cockpit is enabled):
+`shadowtap` exports Prometheus metrics on `http://localhost:8989/metrics`:
 
 ```prometheus
 # HELP shadowtap_shadowed_total Total number of shadowed requests processed.
@@ -229,7 +272,7 @@ Verified on Windows 11 x86_64, Go 1.27:
 
 ```
 BenchmarkProxyOverhead-8        913 ops    1.32 ms/op    50,635 B/op    197 allocs/op
-BenchmarkSemanticDiffing-8   19,972 ops    0.077 ms/op    5,991 B/op    172 allocs/op
+BenchmarkSemanticDiffing-8   19,972 ops    0.073 ms/op    6,327 B/op    188 allocs/op
 ```
 
 - **Forwarding Overhead**: Added proxy overhead is 1.32ms per request, satisfying the `< 1.5ms` invariant.

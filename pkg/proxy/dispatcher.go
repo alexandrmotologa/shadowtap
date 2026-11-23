@@ -13,8 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alexandrmotologa/shadowtap/pkg/alerting"
 	"github.com/alexandrmotologa/shadowtap/pkg/diff"
 	"github.com/alexandrmotologa/shadowtap/pkg/metrics"
+	"github.com/alexandrmotologa/shadowtap/pkg/recorder"
 	"github.com/alexandrmotologa/shadowtap/pkg/security"
 	"github.com/alexandrmotologa/shadowtap/pkg/storage"
 )
@@ -25,6 +27,7 @@ type ShadowTask struct {
 	Timestamp       time.Time
 	Request         *ClonedRequest
 	PrimarySnapshot diff.ResponseSnapshot
+	SamplingRate    float64
 }
 
 // DispatcherConfig tunes concurrency, sampling, and timeout parameters.
@@ -36,7 +39,11 @@ type DispatcherConfig struct {
 	RequestTimeout time.Duration
 	PIIConfig      security.PIIConfig
 	MutationConfig security.MutationConfig
-	MaskConfig     diff.MaskConfig
+	MaskConfig     *diff.MaskConfig
+	CompareOptions diff.CompareOptions
+	ShadowHeaders  map[string]string
+	Recorder       *recorder.TrafficRecorder
+	AlertManager   *alerting.WebhookAlertManager
 }
 
 // ShadowDispatcher coordinates the non-blocking shadow worker pool.
@@ -72,6 +79,10 @@ func NewShadowDispatcher(cfg DispatcherConfig, tel *metrics.GlobalTelemetry, sto
 	}
 	if cfg.SampleRate <= 0 {
 		cfg.SampleRate = 1.0
+	}
+	if cfg.MaskConfig == nil {
+		defaultMask := diff.DefaultMaskConfig()
+		cfg.MaskConfig = &defaultMask
 	}
 
 	transport := &http.Transport{
@@ -116,12 +127,17 @@ func NewShadowDispatcher(cfg DispatcherConfig, tel *metrics.GlobalTelemetry, sto
 // Enqueue submits a captured transaction for background shadowing.
 // It returns immediately to guarantee zero performance degradation on primary traffic.
 func (d *ShadowDispatcher) Enqueue(task ShadowTask) {
+	effectiveRate := task.SamplingRate
+	if effectiveRate <= 0 {
+		effectiveRate = d.config.SampleRate
+	}
+
 	// 1. Sampling filter
-	if d.config.SampleRate < 1.0 {
+	if effectiveRate < 1.0 {
 		d.rndMu.Lock()
 		r := d.rnd.Float64()
 		d.rndMu.Unlock()
-		if r > d.config.SampleRate {
+		if r > effectiveRate {
 			return
 		}
 	}
@@ -202,6 +218,11 @@ func (d *ShadowDispatcher) processTask(task ShadowTask) {
 	shadowReq.Header.Del("Transfer-Encoding")
 	shadowReq.Header.Del("Upgrade")
 
+	// Apply shadow headers overrides
+	for k, v := range d.config.ShadowHeaders {
+		shadowReq.Header.Set(k, v)
+	}
+
 	// Apply mutation transforms (e.g. X-Dry-Run: true)
 	d.config.MutationConfig.ApplySafetyTransforms(shadowReq)
 
@@ -231,7 +252,7 @@ func (d *ShadowDispatcher) processTask(task ShadowTask) {
 	}
 
 	// 5. Semantic Comparison
-	diffResult := diff.CompareSnapshots(task.PrimarySnapshot, shadowSnapshot, &d.config.MaskConfig, diff.DefaultCompareOptions())
+	diffResult := diff.CompareSnapshots(task.PrimarySnapshot, shadowSnapshot, d.config.MaskConfig, d.config.CompareOptions)
 
 	pair := diff.ShadowPair{
 		ID:             task.ID,
@@ -249,10 +270,23 @@ func (d *ShadowDispatcher) processTask(task ShadowTask) {
 	// 6. Record telemetry & save to storage
 	d.storage.Push(pair)
 	d.telemetry.RecordTransaction(pair)
+
+	// 7. Optional offline traffic recording
+	if d.config.Recorder != nil {
+		d.config.Recorder.Record(pair)
+	}
+
+	// 8. Optional webhook alerting
+	if d.config.AlertManager != nil {
+		d.config.AlertManager.CheckAndAlert(pair, d.telemetry.OverallSRR())
+	}
 }
 
 // Stop shuts down the worker pool gracefully.
 func (d *ShadowDispatcher) Stop() {
 	close(d.stopCh)
 	d.wg.Wait()
+	if d.config.Recorder != nil {
+		_ = d.config.Recorder.Close()
+	}
 }

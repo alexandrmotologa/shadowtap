@@ -56,7 +56,7 @@ body {
 .nav-left, .nav-right {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   flex-shrink: 0;
 }
 
@@ -305,6 +305,36 @@ body {
   border: 1px solid rgba(244, 63, 94, 0.3);
 }
 
+/* Latency comparison bar in table */
+.latency-bar-container {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 130px;
+}
+
+.latency-bar-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 8px;
+  background-color: var(--bg-primary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.bar-prim {
+  height: 100%;
+  background-color: var(--accent-blue);
+  border-radius: 2px;
+}
+
+.bar-shad {
+  height: 100%;
+  background-color: var(--color-purple);
+  border-radius: 2px;
+}
+
 /* Split Section */
 .split-section {
   display: grid;
@@ -341,21 +371,23 @@ body {
   border-color: var(--accent-cyan);
 }
 
-.filter-tabs {
+/* Filter Tab Bar */
+.filter-tab-bar {
   display: flex;
+  gap: 6px;
+  padding: 8px 16px;
   background-color: var(--bg-tertiary);
-  border-radius: 6px;
-  padding: 2px;
-  border: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
 }
 
 .tab-btn {
   background: none;
-  border: none;
+  border: 1px solid transparent;
   color: var(--text-muted);
   font-size: 0.72rem;
   font-weight: 600;
-  padding: 5px 10px;
+  padding: 4px 10px;
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
@@ -363,9 +395,15 @@ body {
   transition: all 0.15s ease;
 }
 
+.tab-btn:hover {
+  color: var(--text-main);
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
 .tab-btn.active {
   background-color: var(--bg-secondary);
   color: #fff;
+  border-color: var(--border-subtle);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
@@ -474,11 +512,20 @@ body {
 }
 
 .mismatches-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--color-danger);
   margin-bottom: 8px;
   letter-spacing: 0.5px;
+}
+
+.mismatches-hint {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
 .mismatches-chips {
@@ -496,7 +543,7 @@ body {
   border: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -510,6 +557,25 @@ body {
 .chip-kind.UNEXPECTED_KEY { color: var(--accent-blue); }
 .chip-kind.VALUE_DRIFT { color: var(--color-purple); }
 .chip-kind.STATUS_DRIFT { color: var(--color-danger); }
+
+.btn-chip-ignore {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
+  color: var(--accent-cyan);
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.btn-chip-ignore:hover {
+  background: var(--accent-cyan);
+  color: #000;
+}
 
 .dual-pane-container {
   display: grid;
@@ -528,6 +594,7 @@ body {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border-subtle);
+  overflow: hidden;
 }
 
 .pane-column:last-child {
@@ -570,14 +637,42 @@ body {
   color: var(--text-muted);
 }
 
+.code-view-container {
+  overflow: auto;
+  max-height: 520px;
+}
+
 .code-view {
-  padding: 16px;
   font-family: var(--font-mono);
   font-size: 0.78rem;
   color: #cbd5e1;
-  overflow: auto;
-  max-height: 480px;
   white-space: pre;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Line-by-line visual diff highlighting */
+.diff-line {
+  padding: 1px 16px;
+  line-height: 1.6;
+}
+
+.diff-line.line-del {
+  background-color: rgba(244, 63, 94, 0.18);
+  border-left: 3px solid var(--color-danger);
+  color: #fca5a5;
+}
+
+.diff-line.line-add {
+  background-color: rgba(16, 185, 129, 0.18);
+  border-left: 3px solid var(--color-success);
+  color: #86efac;
+}
+
+.diff-line.line-drift {
+  background-color: rgba(245, 158, 11, 0.18);
+  border-left: 3px solid var(--color-warning);
+  color: #fde047;
 }
 
 .empty-state {
@@ -585,4 +680,26 @@ body {
   padding: 36px 20px;
   color: var(--text-muted);
   font-size: 0.82rem;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background-color: #172235;
+  border: 1px solid var(--accent-cyan);
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  display: none;
+  z-index: 999;
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }

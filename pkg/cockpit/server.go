@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexandrmotologa/shadowtap/pkg/audit"
+	"github.com/alexandrmotologa/shadowtap/pkg/diff"
 	"github.com/alexandrmotologa/shadowtap/pkg/metrics"
 	"github.com/alexandrmotologa/shadowtap/pkg/storage"
 )
@@ -28,18 +30,20 @@ type Server struct {
 	config     ServerConfig
 	telemetry  *metrics.GlobalTelemetry
 	storage    *storage.RingBuffer
+	maskConfig *diff.MaskConfig
 	httpServer *http.Server
 }
 
 // NewServer builds the Cockpit server.
-func NewServer(cfg ServerConfig, tel *metrics.GlobalTelemetry, store *storage.RingBuffer) *Server {
+func NewServer(cfg ServerConfig, tel *metrics.GlobalTelemetry, store *storage.RingBuffer, mask *diff.MaskConfig) *Server {
 	if cfg.Port <= 0 {
 		cfg.Port = 8989
 	}
 	return &Server{
-		config:    cfg,
-		telemetry: tel,
-		storage:   store,
+		config:     cfg,
+		telemetry:  tel,
+		storage:    store,
+		maskConfig: mask,
 	}
 }
 
@@ -52,6 +56,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/routes", s.handleRoutes)
 	mux.HandleFunc("/api/pairs", s.handlePairs)
 	mux.HandleFunc("/api/events/live", s.handleLiveEvents)
+	mux.HandleFunc("/api/export/ndjson", s.handleExportNDJSON)
+	mux.HandleFunc("/api/mask/ignore", s.handleMaskIgnore)
+	mux.HandleFunc("/api/mask", s.handleGetMask)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 
 	// Static frontend assets
@@ -85,7 +92,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
@@ -130,6 +137,75 @@ func (s *Server) handlePairs(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = w.Write([]byte(s.telemetry.FormatPrometheus()))
+}
+
+// handleExportNDJSON streams recorded transaction pairs as a downloadable NDJSON file for CI/CD audits.
+func (s *Server) handleExportNDJSON(w http.ResponseWriter, r *http.Request) {
+	pairs := s.storage.Query(storage.QueryFilter{Limit: 5000})
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"shadowtap_traffic.ndjson\"")
+
+	for _, p := range pairs {
+		headersMap := make(map[string]string)
+		for k, v := range p.RequestHeaders {
+			if len(v) > 0 {
+				headersMap[k] = v[0]
+			}
+		}
+		entry := audit.RecordedEntry{
+			ID:             p.ID,
+			Timestamp:      p.Timestamp.Format(time.RFC3339),
+			Method:         p.Method,
+			Path:           p.Path,
+			Query:          p.Query,
+			RequestHeaders: headersMap,
+			RequestBody:    p.RequestBody,
+			ExpectedStatus: p.Primary.StatusCode,
+			ExpectedBody:   p.Primary.Body,
+		}
+		data, err := json.Marshal(entry)
+		if err == nil {
+			_, _ = w.Write(append(data, '\n'))
+		}
+	}
+}
+
+// handleMaskIgnore registers a new ignore pattern dynamically at runtime without restarting.
+func (s *Server) handleMaskIgnore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+		http.Error(w, "Invalid path payload", http.StatusBadRequest)
+		return
+	}
+
+	if s.maskConfig != nil {
+		s.maskConfig.AddIgnoredPath(req.Path)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success":       true,
+		"added_path":    req.Path,
+		"ignored_paths": s.maskConfig.GetIgnoredPaths(),
+	})
+}
+
+func (s *Server) handleGetMask(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var paths []string
+	if s.maskConfig != nil {
+		paths = s.maskConfig.GetIgnoredPaths()
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ignored_paths": paths,
+	})
 }
 
 // handleLiveEvents pushes real-time diff events to the cockpit via Server-Sent Events (SSE).

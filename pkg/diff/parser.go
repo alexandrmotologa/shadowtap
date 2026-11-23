@@ -10,15 +10,16 @@ import (
 
 // PathTuple represents a single flattened node in a JSON payload.
 type PathTuple struct {
-	Path      string `json:"path"`
-	Type      string `json:"type"`
-	Value     any    `json:"value"`
-	IsMasked  bool   `json:"is_masked"`
+	Path     string `json:"path"`
+	Type     string `json:"type"`
+	Value    any    `json:"value"`
+	IsMasked bool   `json:"is_masked"`
 }
 
 // FlattenJSON parses raw JSON and produces a path-indexed map of PathTuples.
 // If maskConfig is provided, volatile fields are flagged and excluded or replaced.
-func FlattenJSON(raw []byte, maskConfig *MaskConfig) (map[string]PathTuple, any, error) {
+// If sortArrays is true, array items are ordered deterministically to ignore superficial order differences.
+func FlattenJSON(raw []byte, maskConfig *MaskConfig, sortArrays bool) (map[string]PathTuple, any, error) {
 	if len(raw) == 0 {
 		return make(map[string]PathTuple), nil, nil
 	}
@@ -29,13 +30,13 @@ func FlattenJSON(raw []byte, maskConfig *MaskConfig) (map[string]PathTuple, any,
 	}
 
 	flattened := make(map[string]PathTuple)
-	cleanRoot := traverseAndFlatten("", parsed, flattened, maskConfig)
+	cleanRoot := traverseAndFlatten("", parsed, flattened, maskConfig, sortArrays)
 
 	return flattened, cleanRoot, nil
 }
 
 // traverseAndFlatten recursively visits nodes, populates flattened map, and returns a clean tree.
-func traverseAndFlatten(currentPath string, node any, out map[string]PathTuple, mask *MaskConfig) any {
+func traverseAndFlatten(currentPath string, node any, out map[string]PathTuple, mask *MaskConfig, sortArrays bool) any {
 	if node == nil {
 		t := PathTuple{
 			Path:  currentPath,
@@ -76,14 +77,20 @@ func traverseAndFlatten(currentPath string, node any, out map[string]PathTuple, 
 				continue
 			}
 
-			cleanVal := traverseAndFlatten(childPath, val[k], out, mask)
+			cleanVal := traverseAndFlatten(childPath, val[k], out, mask, sortArrays)
 			cleanMap[k] = cleanVal
 		}
 		return cleanMap
 
 	case []any:
-		cleanSlice := make([]any, len(val))
-		for i, elem := range val {
+		sliceCopy := make([]any, len(val))
+		copy(sliceCopy, val)
+		if sortArrays && len(sliceCopy) > 1 {
+			sortSliceDeterministically(sliceCopy)
+		}
+
+		cleanSlice := make([]any, len(sliceCopy))
+		for i, elem := range sliceCopy {
 			childPath := currentPath + "[" + strconv.Itoa(i) + "]"
 
 			if mask != nil && mask.IsPathIgnored(childPath) {
@@ -97,7 +104,7 @@ func traverseAndFlatten(currentPath string, node any, out map[string]PathTuple, 
 				continue
 			}
 
-			cleanElem := traverseAndFlatten(childPath, elem, out, mask)
+			cleanElem := traverseAndFlatten(childPath, elem, out, mask, sortArrays)
 			cleanSlice[i] = cleanElem
 		}
 		return cleanSlice
@@ -159,6 +166,14 @@ func traverseAndFlatten(currentPath string, node any, out map[string]PathTuple, 
 		}
 		return val
 	}
+}
+
+func sortSliceDeterministically(slice []any) {
+	sort.SliceStable(slice, func(i, j int) bool {
+		aBytes, _ := json.Marshal(slice[i])
+		bBytes, _ := json.Marshal(slice[j])
+		return string(aBytes) < string(bBytes)
+	})
 }
 
 // typeName extracts a standardized JSON-friendly type string.

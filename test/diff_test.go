@@ -121,3 +121,46 @@ func TestSemanticDiff_StatusDrift(t *testing.T) {
 		t.Fatalf("expected semantic distance 1.0 for status drift, got %f", res.SemanticDistance)
 	}
 }
+
+func TestSemanticDiff_UnorderedArrayMatch(t *testing.T) {
+	primary := `{"user": "alex", "permissions": ["read", "write", "delete"]}`
+	// Candidate returns permissions in different order
+	shadow := `{"user": "alex", "permissions": ["delete", "read", "write"]}`
+
+	snap1 := diff.NewResponseSnapshot(200, http.Header{}, primary, 5*time.Millisecond, nil)
+	snap2 := diff.NewResponseSnapshot(200, http.Header{}, shadow, 6*time.Millisecond, nil)
+
+	opts := diff.DefaultCompareOptions()
+	opts.IgnoreArrayOrder = true
+
+	res := diff.CompareSnapshots(snap1, snap2, nil, opts)
+	if !res.IsMatch {
+		t.Fatalf("expected unordered arrays to match, got mismatches: %+v", res.Mismatches)
+	}
+	if res.SemanticDistance != 0.0 {
+		t.Fatalf("expected distance 0.0, got %f", res.SemanticDistance)
+	}
+}
+
+func TestSemanticDiff_DynamicMaskAdd(t *testing.T) {
+	primary := `{"id": 100, "feature_v2": false}`
+	shadow := `{"id": 100, "feature_v2": true}`
+
+	snap1 := diff.NewResponseSnapshot(200, http.Header{}, primary, 5*time.Millisecond, nil)
+	snap2 := diff.NewResponseSnapshot(200, http.Header{}, shadow, 6*time.Millisecond, nil)
+
+	maskCfg := diff.DefaultMaskConfig()
+	// Initially, feature_v2 will mismatch
+	resInitial := diff.CompareSnapshots(snap1, snap2, &maskCfg, diff.DefaultCompareOptions())
+	if resInitial.IsMatch {
+		t.Fatal("expected initial mismatch on feature_v2")
+	}
+
+	// Dynamically add ignore rule at runtime
+	maskCfg.AddIgnoredPath("feature_v2")
+
+	resAfter := diff.CompareSnapshots(snap1, snap2, &maskCfg, diff.DefaultCompareOptions())
+	if !resAfter.IsMatch {
+		t.Fatalf("expected match after dynamic ignore rule added, got: %+v", resAfter.Mismatches)
+	}
+}

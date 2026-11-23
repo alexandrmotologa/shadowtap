@@ -17,9 +17,12 @@ import (
 
 // ProxyServerConfig holds parameters for the primary reverse proxy and shadowing engine.
 type ProxyServerConfig struct {
-	ListenAddr    string
-	PrimaryTarget string
-	MaxBodyBytes  int64
+	ListenAddr           string
+	PrimaryTarget        string
+	MaxBodyBytes         int64
+	ExclusionChecker     func(path string) bool
+	SamplingRateResolver func(path string) float64
+	HeaderFilterChecker  func(headers http.Header) bool
 }
 
 // responseCapture is an http.ResponseWriter that captures status code and body for diffing.
@@ -110,19 +113,35 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	txID := "tx-" + strconv.FormatUint(s.txCounter.Add(1), 10)
 	arrival := time.Now()
 
-	// 1. Clone inbound request asynchronously before reading stream for primary
-	clonedReq, cloneErr := CloneInboundRequest(r, s.config.MaxBodyBytes)
-	if cloneErr != nil {
-		// Log and continue proxying to primary
-		clonedReq = &ClonedRequest{
-			Method:  r.Method,
-			URLPath: r.URL.Path,
-			Query:   r.URL.RawQuery,
-			Headers: r.Header.Clone(),
-			Host:    r.Host,
+	// Check if this path or headers should skip shadowing entirely
+	shouldShadow := true
+	if s.dispatcher == nil {
+		shouldShadow = false
+	} else {
+		if s.config.ExclusionChecker != nil && s.config.ExclusionChecker(r.URL.Path) {
+			shouldShadow = false
+		}
+		if shouldShadow && s.config.HeaderFilterChecker != nil && !s.config.HeaderFilterChecker(r.Header) {
+			shouldShadow = false
 		}
 	}
-	clonedReq.ID = txID
+
+	var clonedReq *ClonedRequest
+	if shouldShadow {
+		// 1. Clone inbound request asynchronously before reading stream for primary
+		var cloneErr error
+		clonedReq, cloneErr = CloneInboundRequest(r, s.config.MaxBodyBytes)
+		if cloneErr != nil {
+			clonedReq = &ClonedRequest{
+				Method:  r.Method,
+				URLPath: r.URL.Path,
+				Query:   r.URL.RawQuery,
+				Headers: r.Header.Clone(),
+				Host:    r.Host,
+			}
+		}
+		clonedReq.ID = txID
+	}
 
 	// 2. Wrap ResponseWriter to capture primary status code and body
 	capture := &responseCapture{
@@ -135,22 +154,27 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.reverseProxy.ServeHTTP(capture, r)
 	primLatency := time.Since(primStart)
 
-	// 4. Capture Primary response snapshot
-	primarySnapshot := diff.ResponseSnapshot{
-		StatusCode: capture.statusCode,
-		Headers:    capture.Header().Clone(),
-		Body:       capture.body.String(),
-		Latency:    primLatency,
-		LatencyMs:  float64(primLatency.Microseconds()) / 1000.0,
-	}
+	// 4. Capture Primary response snapshot and enqueue shadow task
+	if shouldShadow && clonedReq != nil {
+		primarySnapshot := diff.ResponseSnapshot{
+			StatusCode: capture.statusCode,
+			Headers:    capture.Header().Clone(),
+			Body:       capture.body.String(),
+			Latency:    primLatency,
+			LatencyMs:  float64(primLatency.Microseconds()) / 1000.0,
+		}
 
-	// 5. Enqueue shadow task asynchronously (non-blocking)
-	if s.dispatcher != nil {
+		effectiveRate := 1.0
+		if s.config.SamplingRateResolver != nil {
+			effectiveRate = s.config.SamplingRateResolver(clonedReq.URLPath)
+		}
+
 		s.dispatcher.Enqueue(ShadowTask{
 			ID:              txID,
 			Timestamp:       arrival,
 			Request:         clonedReq,
 			PrimarySnapshot: primarySnapshot,
+			SamplingRate:    effectiveRate,
 		})
 	}
 }

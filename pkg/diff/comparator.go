@@ -17,6 +17,8 @@ type CompareOptions struct {
 	StrictStatus bool
 	// RegressionThreshold determines the minimum semantic distance to flag a regression (default 0.0).
 	RegressionThreshold float64
+	// IgnoreArrayOrder treats arrays as unordered sets when checking item values.
+	IgnoreArrayOrder bool
 }
 
 // DefaultCompareOptions provides robust defaults.
@@ -25,6 +27,7 @@ func DefaultCompareOptions() CompareOptions {
 		NumericEpsilon:      1e-6,
 		StrictStatus:        true,
 		RegressionThreshold: 0.0,
+		IgnoreArrayOrder:    true,
 	}
 }
 
@@ -92,8 +95,8 @@ func CompareSnapshots(primary, shadow ResponseSnapshot, maskConfig *MaskConfig, 
 		return result
 	}
 
-	primFlat, primClean, primErr := FlattenJSON(primBytes, maskConfig)
-	shadFlat, shadClean, shadErr := FlattenJSON(shadBytes, maskConfig)
+	primFlat, primClean, primErr := FlattenJSON(primBytes, maskConfig, opts.IgnoreArrayOrder)
+	shadFlat, shadClean, shadErr := FlattenJSON(shadBytes, maskConfig, opts.IgnoreArrayOrder)
 
 	// If either body is not valid JSON, fall back to string comparison
 	if primErr != nil || shadErr != nil {

@@ -4,6 +4,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // Standard volatile patterns detected in dynamic microservices.
@@ -23,6 +24,7 @@ var (
 
 // MaskConfig governs which paths and dynamic values are treated as transient noise.
 type MaskConfig struct {
+	mu sync.RWMutex
 	// IgnoredPaths contains glob patterns or exact path names (e.g. "*.timestamp", "metadata.requestId").
 	IgnoredPaths []string
 	// IgnoreTimestamps removes values matching RFC 3339 timestamps.
@@ -62,9 +64,39 @@ func DefaultMaskConfig() MaskConfig {
 	}
 }
 
+// AddIgnoredPath thread-safely appends a new path pattern to the active ignore rules.
+func (c *MaskConfig) AddIgnoredPath(p string) bool {
+	if p == "" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	pLower := strings.ToLower(p)
+	for _, existing := range c.IgnoredPaths {
+		if strings.ToLower(existing) == pLower {
+			return false // Already present
+		}
+	}
+	c.IgnoredPaths = append(c.IgnoredPaths, p)
+	return true
+}
+
+// GetIgnoredPaths returns a snapshot slice of currently active ignored patterns.
+func (c *MaskConfig) GetIgnoredPaths() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	res := make([]string, len(c.IgnoredPaths))
+	copy(res, c.IgnoredPaths)
+	return res
+}
+
 // IsPathIgnored checks if a given JSON path matches any configured ignored patterns.
 func (c *MaskConfig) IsPathIgnored(p string) bool {
-	// Normalize path by lowercasing for case-insensitive matching
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
 	pLower := strings.ToLower(p)
 
 	for _, pattern := range c.IgnoredPaths {
@@ -84,6 +116,13 @@ func (c *MaskConfig) IsPathIgnored(p string) bool {
 				return true
 			}
 		}
+		// Substring match if wildcard at ends
+		if strings.HasPrefix(patLower, "*") && strings.HasSuffix(patLower, "*") {
+			sub := strings.Trim(patLower, "*")
+			if strings.Contains(pLower, sub) {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -93,6 +132,9 @@ func (c *MaskConfig) IsValueVolatile(valStr string) bool {
 	if valStr == "" {
 		return false
 	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
 	if c.IgnoreTimestamps && regexISO8601.MatchString(valStr) {
 		return true
